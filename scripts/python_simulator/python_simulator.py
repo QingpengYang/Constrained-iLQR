@@ -49,7 +49,7 @@ class PySimulator:
         self.last_ego_states = np.array([self.simparams.start_state[0], self.simparams.start_state[1]])
 
         # Plot parameters
-        self.fig = plt.figure(figsize=(25, 5))
+        self.fig = plt.figure(figsize=(40, 5))
         self.ax = self.fig.add_subplot(111)
         self.ax.axis('equal')
         self.ax.set_xlim(-5, self.simparams.map_lengthx+5)
@@ -92,7 +92,7 @@ class PySimulator:
         self.NPC_states.append(init_state)
         control = np.hstack((control, np.zeros((2, self.args.horizon))))
         for i in range(control.shape[1]):
-            NPC_next_state = self.run_model_simulation(self.NPC_states[i], control[:, i])
+            NPC_next_state = self.run_model_simulation_NPC(self.NPC_states[i], control[:, i])
             self.NPC_states.append(NPC_next_state)
         self.NPC_states = np.array(self.NPC_states).T
         
@@ -137,7 +137,7 @@ class PySimulator:
         print(time.process_time() - start)
         
         self.count += 1
-        print("Controller: Acc {} Steer: {}".format(control[0, 0], control[1, 0]))
+        print("Controller: Steer: {}".format(control[0, 0]))
 
         return desired_path, local_plan, control[:, 0]
  
@@ -148,7 +148,7 @@ class PySimulator:
 
         self.last_ego_states = np.vstack((self.last_ego_states, self.current_ego_state[0:2]))
         
-        self.NPC_dict[0].createCuboid([self.current_ego_state[0], self.current_ego_state[1], self.current_ego_state[3]]) # Update ego vehicle patch
+        self.NPC_dict[0].createCuboid([self.current_ego_state[0], self.current_ego_state[1], self.current_ego_state[2]]) # Update ego vehicle patch
         self.patches[0].set_xy(self.NPC_dict[0].getCorners()) # Update ego vehicle patch
 
         # Get new NPC patch
@@ -180,8 +180,25 @@ class PySimulator:
                                blit=True,
                                repeat=False)
         plt.show()
+        writervideo = animation.FFMpegWriter(fps=10)
+        anim.save('movie.mp4', writer=writervideo)
 
     def run_model_simulation(self, state, control):
+        """
+        Find the next state of the vehicle given the current state and control input
+        """
+        # Clips the controller values between min and max accel and steer values
+        control[0] = np.clip(control[0], self.simparams.steer_min, self.simparams.steer_max)
+        # control[1] = np.clip(control[1], state[2]*tan(self.steer_min)/self.wheelbase, state[2]*tan(self.steer_max)/self.wheelbase)
+        Ts = self.simparams.dt
+        next_state = np.array([state[0] + self.args.const_speed * cos(state[2]) * Ts,
+                               state[1] + self.args.const_speed * sin(state[2]) * Ts,
+                               state[2] + self.args.const_speed / self.args.tractor_l * tan(control[0]) * Ts,
+                               state[3] + self.args.const_speed / self.args.trailer_d * sin(state[3] - state[2]) * Ts]) 
+
+        return next_state
+
+    def run_model_simulation_NPC(self, state, control):
         """
         Find the next state of the vehicle given the current state and control input
         """
@@ -200,8 +217,8 @@ class PySimulator:
 
 class SimParams:
     dt = 0.1
-    sim_time = 100
-    map_lengthx = 50
+    sim_time = 40
+    map_lengthx = 70
     map_lengthy = 6
     lane1 = 5
     lane2 = 0
@@ -218,7 +235,7 @@ class SimParams:
     accel_min = -5.5
     accel_max = 3.0
     desired_y = 2.5
-    NPC_max_acc = 0.75
+    NPC_max_acc = 1.5
 
 
 
@@ -228,7 +245,7 @@ if __name__ == "__main__":
     add_arguments(argparser)
     args = argparser.parse_args()
 
-    NPC_start = np.array([10, 2.5, 0, 0])
+    NPC_start = np.array([5, 2.5, 1, 0])
     NPC_ctrl = np.zeros((2, SimParams.sim_time))
     NPC_ctrl[0,:] = np.linspace(SimParams.NPC_max_acc, 0, SimParams.sim_time)
     num_vehicles = 2

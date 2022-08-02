@@ -17,7 +17,7 @@ class Obstacle:
         P1 = np.diag([1/a**2, 1/b**2, 0, 0])
 
         theta = npc_traj[3, i]
-        theta_ego = ego_state[3]
+        theta_ego = ego_state[2]
 
         transformation_matrix = np.array([[ math.cos(theta), math.sin(theta), 0, 0],
                                           [-math.sin(theta), math.cos(theta), 0, 0],

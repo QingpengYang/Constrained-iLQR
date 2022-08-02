@@ -8,12 +8,11 @@ from ilqr.obstacles import Obstacle
 class Constraints:
 	def __init__(self, args, obstacle_bb):
 		self.args = args
-		self.control_cost = np.array([[self.args.w_acc,                   0],
-									  [              0, self.args.w_yawrate]])
+		self.control_cost = np.array([self.args.w_steer])
 
 		self.state_cost = np.array([[self.args.w_pos, 0, 0, 0],
 									[0, self.args.w_pos, 0, 0],
-									[0, 0, self.args.w_vel, 0],
+									[0, 0,               0, 0],
 									[0, 0, 0,               0]])
 		self.coeffs = None
 
@@ -33,7 +32,7 @@ class Constraints:
 		for i in range(self.args.horizon):
 			# Offset in path derivative
 			x_r, y_r = self.find_closest_point(state[:, i], poly_coeffs, x_local_plan)
-			traj_cost = 2*self.state_cost@(np.array([state[0, i]-x_r, state[1, i]-y_r, state[2, i]-self.args.desired_speed, 0]))
+			traj_cost = 2*self.state_cost@(np.array([state[0, i]-x_r, state[1, i]-y_r, 0, 0]))
 
 			# Compute first order derivative
 			l_x_i = traj_cost
@@ -101,10 +100,34 @@ class Constraints:
 
 		return l_u, l_uu
 
+	def get_control_cost_derivatives_1(self, control):
+		"""
+		Returns the control quadratic (R matrix) and linear cost term (r vector) for the trajectory
+		"""
+		l_u = np.zeros((self.args.num_ctrls, self.args.horizon))
+		l_uu = np.zeros((self.args.num_ctrls, self.args.horizon))
+
+		for i in range(self.args.horizon):
+			# Steer angle Barrier Max
+			c = (control[:,i] - self.args.steer_angle_limits[1])
+			b_1, b_dot_1, b_ddot_1 = self.barrier_function(self.args.q1_steer, self.args.q2_steer, c, 1)
+
+			# Steer angle Barrier Min
+			c = (self.args.steer_angle_limits[0] - control[:,i])
+			b_2, b_dot_2, b_ddot_2 = self.barrier_function(self.args.q1_steer, self.args.q2_steer, c, -1)
+
+			l_u_i = b_dot_1 + b_dot_2 + (2*control[:,i] * self.args.w_steer).reshape(-1, 1)
+			l_uu_i = b_ddot_1 + b_ddot_2 + 2*self.args.w_steer
+
+			l_u[:,i] = l_u_i.squeeze()
+			l_uu[:,i] = l_uu_i.squeeze()
+
+		return l_u, l_uu
+
 	def barrier_function(self, q1, q2, c, c_dot):
 		b = q1*np.exp(q2*c)
 		b_dot = q1*q2*np.exp(q2*c)*c_dot
-		b_ddot = q1*(q2**2)*np.exp(q2*c)*np.matmul(c_dot, c_dot.T)
+		b_ddot = q1*(q2**2)*np.exp(q2*c)*c_dot*c_dot
 
 		return b, b_dot, b_ddot
 
@@ -115,7 +138,7 @@ class Constraints:
 		"""
 		self.state = state
 		# pdb.set_trace()
-		l_u, l_uu = self.get_control_cost_derivatives(state, control)
+		l_u, l_uu = self.get_control_cost_derivatives_1(control)
 		l_x, l_xx = self.get_state_cost_derivatives(state, poly_coeffs, x_local_plan, npc_traj)
 		l_ux = np.zeros((self.args.num_ctrls, self.args.num_states, self.args.horizon))
 		# l = c_state + c_ctrl
@@ -129,11 +152,17 @@ class Constraints:
 		J = 0
 		for i in range(self.args.horizon):
 			x_r, y_r = self.find_closest_point(state[:, i], poly_coeffs, x_local_plan)
-			ref_state = np.array([x_r, y_r, self.args.desired_speed, 0]) # Theta does not matter
-			state_diff = state[:,i]-ref_state
+			# ref_state = np.array([x_r, y_r, self.args.desired_speed, 0]) # Theta does not matter
+			# state_diff = state[:,i]-ref_state
+			state_diff = np.array([state[0,i] - x_r,
+								   state[1,i] - y_r,
+								       			  0,
+								   				  0])
 
 			c_state = state_diff.T @ self.state_cost @ state_diff
-			c_ctrl = control_seq[:,i].T @ self.control_cost @ control_seq[:,i]
+			
+			c_ctrl = self.args.w_steer * (control_seq[:,i].T @ control_seq[:,i])
+			# c_ctrl = control_seq[:,i].T @ self.control_cost @ control_seq[:,i]
 
 			J = J + c_state + c_ctrl
 		return J

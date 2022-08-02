@@ -26,7 +26,7 @@ class iLQR():
         
         # initial nominal trajectory
         self.control_seq = np.zeros((self.args.num_ctrls, self.args.horizon))
-        self.control_seq[0, :] = np.ones((self.args.horizon)) * 0.5
+        # self.control_seq[0, :] = np.ones((self.args.horizon)) * 0.5
         self.debug_flag = 0
 
         self.lamb_factor = 10
@@ -60,12 +60,13 @@ class iLQR():
         # Find control sequence that minimizes Q-value function
         # Get derivatives of Q-function wrt to state and control
         l_x, l_xx, l_u, l_uu, l_ux = self.constraints.get_cost_derivatives(X[:, 1:], U, poly_coeff, x_local_plan, npc_traj) 
-        df_dx = self.vehicle_model.get_A_matrix(X[2, 1:], X[3, 1:], U[0,:])
-        df_du = self.vehicle_model.get_B_matrix(X[3, 1:])
+        df_dx = self.vehicle_model.get_A_matrix_1(X[2, 1:], X[3, 1:])
+        df_du = self.vehicle_model.get_B_matrix_1(U[0,:])
+
         # Value function at final timestep is known
         V_x = l_x[:,-1] 
         V_xx = l_xx[:,:,-1]
-        # Allocate space for feedforward and feeback term
+        # Allocate space for feedforward and feedback term
         k = np.zeros((self.args.num_ctrls, self.args.horizon))
         K = np.zeros((self.args.num_ctrls, self.args.num_states, self.args.horizon))
         # Run a backwards pass from N-1 control step
@@ -74,7 +75,8 @@ class iLQR():
             Q_u = l_u[:,i] + df_du[:,:,i].T @ V_x
             Q_xx = l_xx[:,:,i] + df_dx[:,:,i].T @ V_xx @ df_dx[:,:,i] 
             Q_ux = l_ux[:,:,i] + df_du[:,:,i].T @ V_xx @ df_dx[:,:,i]
-            Q_uu = l_uu[:,:,i] + df_du[:,:,i].T @ V_xx @ df_du[:,:,i]
+            Q_uu = l_uu[:,i] + df_du[:,:,i].T @ V_xx @ df_du[:,:,i]
+            print("79 ", Q_uu)
             # Q_uu_inv = np.linalg.pinv(Q_uu)
             Q_uu_evals, Q_uu_evecs = np.linalg.eig(Q_uu)
             Q_uu_evals[Q_uu_evals < 0] = 0.0
@@ -119,7 +121,8 @@ class iLQR():
             k, K = self.backward_pass(X, U, poly_coeff, x_local_plan, npc_traj, lamb)
             # Get control values at control points and new states again by a forward rollout
             X_new, U_new = self.forward_pass(X, U, k, K)
-            J_new = self.constraints.get_total_cost(X, U, poly_coeff, x_local_plan, npc_traj)
+            # J_new = self.constraints.get_total_cost(X, U, poly_coeff, x_local_plan, npc_traj)
+            J_new = self.constraints.get_total_cost(X_new, U_new, poly_coeff, x_local_plan, npc_traj)
             
             if J_new < J_old:
                 X = X_new
